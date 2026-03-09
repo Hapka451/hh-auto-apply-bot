@@ -1,0 +1,8 @@
+venv/
+yandex_profile/
+log.txt
+*.log
+yandexdriver
+path
+__pycache__/
+.DS_Store
