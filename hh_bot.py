@@ -1,3 +1,6 @@
+from config import MAX_APPLICATIONS, IGNORED_EMPLOYERS
+from bot.vacancy import Vacancy
+from bot.filters import vacancy_passes_filters
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -12,8 +15,6 @@ from datetime import datetime
 # НАСТРОЙКИ
 # ==========================================
 
-MAX_APPLICATIONS = 197
-IGNORED_EMPLOYERS = ["сбер", "sber"]
 CHROMEDRIVER_PATH = os.path.expanduser("~/hh_bot/chromedriver")
 LOG_FILE = os.path.expanduser("~/hh_bot/log.txt")
 
@@ -150,34 +151,66 @@ def is_ignored_employer(employer_name):
 def get_vacancy_cards(driver):
     results = []
     print("👀 Просматриваю список вакансий...")
+
     for i in range(6):
         driver.execute_script("window.scrollBy(0, 300)")
         time.sleep(random.uniform(0.5, 1))
+
     driver.execute_script("window.scrollTo(0, 0)")
     time.sleep(1)
+
     cards = driver.find_elements(By.CSS_SELECTOR, "[data-qa='vacancy-serp__vacancy']")
     print("📊 Карточек вакансий на странице: " + str(len(cards)))
+
     for card in cards:
         try:
             try:
                 title = card.find_element(By.CSS_SELECTOR, "h2").text.strip()
             except:
                 title = "Без названия"
+
             try:
-                employer = card.find_element(By.CSS_SELECTOR, "[data-qa='vacancy-serp__vacancy-employer'], [data-qa='vacancy-serp__vacancy-employer-text']").text.strip()
+                employer = card.find_element(
+                    By.CSS_SELECTOR,
+                    "[data-qa='vacancy-serp__vacancy-employer'], [data-qa='vacancy-serp__vacancy-employer-text']"
+                ).text.strip()
             except:
                 employer = ""
-            if is_ignored_employer(employer):
-                print("  🚫 Игнорирую: " + employer + " — " + title)
-                log("🚫 ПРОПУЩЕНО (игнор): " + employer + " — " + title, to_console=False)
-                session_stats["skipped_ignored"] += 1
-                continue
+
             btn = card.find_element(By.CSS_SELECTOR, "[data-qa='vacancy-serp__vacancy_response']")
             href = btn.get_attribute("href")
-            if href:
-                results.append({"title": title, "href": href, "employer": employer, "element": card})
+
+            if not href:
+                continue
+
+            vacancy = Vacancy(
+                title=title,
+                employer=employer,
+                href=href,
+                element=card,
+            )
+
+            passed, reason = vacancy_passes_filters(vacancy)
+
+            if not passed:
+                print("  🚫 Пропуск: " + reason + " — " + title + " | " + employer)
+                log("🚫 ПРОПУЩЕНО (" + reason + "): " + title + " | " + employer, to_console=False)
+
+                if reason == "ignored employer":
+                    session_stats["skipped_ignored"] += 1
+
+                continue
+
+            results.append({
+                "title": vacancy.title,
+                "employer": vacancy.employer,
+                "href": vacancy.href,
+                "element": vacancy.element
+            })
+
         except:
             continue
+
     return results
 
 def has_extra_requirements(driver):
